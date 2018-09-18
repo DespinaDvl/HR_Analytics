@@ -1,0 +1,478 @@
+
+#Introduction 
+
+This document contains all analysis procedures and their relevant outcome while exploring the dataset Hackathon_Data_2018.csv. The analysis was undertaken as part of the 2018 MIS40970 Hackathon project. This is an updated and extended lab notebook containing code and relevant analysis and will be the basis for the final report which will be addressed to the HR department of the company that provided the initial dataset. 
+
+# Initial Setup & Prelimimary Analysis 
+This report is written using R Markdown, to aid with rendering code and its outputs.
+A plain .r script is also provided as part of this submission, should it be needed.
+Along with loading the dataset we proceed to loading any packages that will be used in throughout the analysis. 
+
+```{r,message=FALSE,warning=FALSE, include=FALSE}
+data <- read.csv("Hackathon_Data_2018.csv")
+library(knitr)
+library(ggplot2)
+library(dplyr)
+library(Hmisc)
+library(scales)
+library(caret)
+library(corrplot)
+library(reshape2)
+library(mlbench)
+library(caTools)
+library(Boruta)
+library(rpart)
+library(rpart.plot)
+library(pROC)
+library(ROCR)
+library(plyr)
+library(randomForest)
+library(gbm)
+library(DMwR)
+library(C50)
+```
+
+The intital goal is to properly understand the data set, explore the variables and identify and subsequently quantify their scope. In order to do so, i will check the raw data and set the variable that i consider the most relevant one, when it comes to the current analysis, as my predictor target.I specifically want to check the last rows of my dataset so that if there are any prevalent inconsistencies i can address them. I will use the describe() function to get the number of variables and observations, the number of missing and unique values, the mean, quantiles, and the five highest and lowest values. Furthermore, i will check the classes of each column so that i can later proceed to the appropriate class conversions. 
+
+```{r, warning=FALSE, messages = FALSE, include = FALSE}
+glimpse(data)
+head(data[1:9])
+tail(data[,1:9])
+describe(data)
+```
+
+So we are dealing with a dataset that consists of 1470 rows each of which corresponds to 34 variables that are used to characterize an employee. We can see that the specific datset has demographic and organizational features (age, gender, role etc) as well as sentiment features (Job, Environmental Satisfaction amongst others). There are no missing values in the current dataset but there are duplicates something that is normal since our dataset consists of people's features. There are also columns with only one distinct value which will not be taken into consideration since they will not add anything in the modelling process. 
+
+##Data Preparation and Preprocessing
+
+Analysing the associations will be the basis of the current project, but before doing so let's clean our dataset, remove any variables that are of no use and finally convert variables to formats that will be more useful during the statistical analysis and modelling process.
+
+```{r}
+data$Over18<-NULL
+data$EmployeeCount<-NULL
+data$StandardHours<-NULL
+data$EmployeeNumber <- NULL
+
+```
+
+So, 4 variables were successfully removed from our dataset. Next step is the conversion of categorical variables to factor variables in order to ensure that they can be used in statistical modelling. Since the numbering indicates the proper ordering we will use the factor function. 
+
+```{r, message=FALSE, warning = FALSE, include=TRUE, results="hide"}
+names <- c("Education", "EnvironmentSatisfaction", "JobInvolvement", "JobLevel", "PerformanceRating", "RelationshipSatisfaction", "WorkLifeBalance", "StockOptionLevel")
+data[, names] <- lapply(data[,names], factor)
+```
+
+
+
+## Exploratory Data Analysis
+
+###Department Wise Factor Analysis 
+
+Since the analysis objective is to investigate the recent high turnover to other companies, we will set the variable "Past_Employee" as the predictor variable and we will further explore it. We can see that when it comes to the predictor variable, the contingency table shows that out of the 1470 employees 237 have left the company which is approximately 16% of the workforce.So we are dealing with imbalanced data since the two classes are not equally represented. The difference is significant enough to be ignored and we shall keep in mind that it can lead to a misleading classification accuracy in the models predictions. 
+
+We will explore relevant associations between the predictor variable and other variables later on but as a starting point we want to see the association between our predictor variable (Past_Employees) and the relevant departments in the company. 
+
+```{r}
+ggplot(data, aes(x = Past_Employee)) +
+  geom_bar(aes(y = (..count..)/sum(..count..)), fill= "#999999") +
+  geom_text(aes(y = ((..count..)/sum(..count..)), label = scales::percent((..count..)/sum(..count..))), stat = "count", vjust = 0.1) +
+  scale_y_continuous(labels = percent) +
+  labs(y = "Percent", x = "Past Employees") + 
+  theme(axis.text.y = element_text(angle = 45)) +
+  theme(panel.grid.major = element_blank()) +
+  ggtitle("Overall Categorization of Workforce") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data, aes(x = Department)) + 
+  geom_bar(aes(y = (..count..)/sum(..count..)), fill= "#999999") +
+  geom_text(aes(y = ((..count..)/sum(..count..)), label = scales::percent((..count..)/sum(..count..))), stat = "count", vjust = 0.1) +
+  scale_y_continuous(labels = percent) +
+  labs(y = "Percent", x = "Department") + 
+  theme(axis.text.y = element_text(angle = 45)) +
+  theme(panel.grid.major = element_blank()) +
+  ggtitle("Department wise Categorization of Workforce") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+We can see that more than half of the company's workforce (65%) works in the R&D department, 30% in the Sales department and only 4% in the HR department. 
+
+But how about the people who have already left the company? Which departments were they working for?
+It seems that R&D department followed closely by Sales department where the ones that lost most of their employees.
+
+```{r}
+ggplot(filter(data, as.character(Past_Employee)=="Yes") , aes(x=Department)) + 
+  geom_bar(aes(y=(..count..)/sum(..count..)), position="dodge", fill= "#999999") +
+  scale_y_continuous(labels =percent) +
+  ylab("Percentage") +
+  ggtitle("Past Employees & Relevant Departments") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Education is a factor worth investing since it may lead to some insightfull observations, not in terms of classifying personnel but mainly in terms of identifying noticeable patterns. We explore the variable Education Field department wise and even though we observe a certain degree of mismatch, as far as i am concerned this is not a strong indicator of employees disatisfaction that could ultimately lead to hihgher turnover of staff.
+A really interesting finding is that people with HR education background are entirely absorbed in the relevant department. The same applies with people with marketing educational background, they are entirely absorbed in the sales department. The relevant department could benefit if they had a more balanced personnel ratio when it comes to the educational background factor. 
+
+```{r}
+table(data$Department, data$EducationField)
+
+ggplot(data,aes(Department,fill=EducationField))+geom_bar()+
+  scale_fill_brewer(palette = 9) +
+  theme(legend.position="right",plot.title=element_text(hjust=0.5,size=13),axis.text.x = element_text(angle=10))+
+  labs(x="Department",title="Education Field Department wise")+
+  scale_color_brewer(palette = "Pastel2")
+```
+
+How about the age of employees? The majority of the personnel is between 30 and 40 years old. 
+Department wise though? I do not observe any profound patterns but overall i can comment that R&D department
+looses mainly younger employees while the ages of people who have left the company and were working in the Sales department are more distributed. 
+Finally the gender factor was analysed and generally the female-male ration is balanced in all departments and definately doesn't seem to interrelate with the turnover rate. But an interesting finding that could serve as a basis for further investigation is that the number of male current employess in the R&D department is higher than the relevant one for women. 
+
+```{r}
+ggplot(data, 
+        aes(x= Age,  group=Department)) + 
+        geom_bar() +
+        facet_grid(Past_Employee~Department) 
+
+
+ggplot(data=data, aes(Age)) + 
+        geom_histogram(breaks=seq(20, 60, by=10), 
+                       aes(fill=..count..))+ 
+        labs(x="Age", y="Count")+
+        scale_fill_gradient("Count", low="grey", high="red")
+
+ggplot(data=data,aes(Gender))+
+  geom_bar()+
+  facet_grid(Past_Employee~Department)
+```
+###Factors that may affect overall satisfaction level  
+
+I will now explore aspects that i personally consider important when it comes to quantifying employee's overall satisfaction levels. 
+In terms of salary we are dealing with 4 distinct variables but we will focus on the one that has to do with an employe's monthly income and the one that has to do with the hourly rate. As expected, people who earn less are more likely to leave but this is just an observation and we still have to examine more aspects of the current dataset.Generally people with montly income less than approximately 5000 are most likely included in the employees who have left the company. 
+
+```{r}
+ggplot(data, aes(x = MonthlyIncome, color = Past_Employee)) + 
+  geom_density(fill= "grey") +
+  theme(axis.text.y = element_text(angle = 45)) +
+  theme(panel.grid.major = element_blank()) +
+  theme(panel.grid.minor = element_blank()) +
+  scale_color_brewer(palette="Dark2")
+
+  ggplot(data,aes(x = HourlyRate, color = Past_Employee)) + 
+  geom_density(fill = "grey") +
+  theme(axis.text.y = element_text(angle = 45)) +
+  theme(panel.grid.major = element_blank()) +
+  theme(panel.grid.minor = element_blank()) +
+  scale_color_brewer(palette="Dark2")
+```
+
+In terms of working overtime and turnover rate, in a general sense we suspect that this feature may highligh some interesting points. In terms of people who have already left the company, there is a balanced ratio when it comes to working overtime or not. So we can hypothetize that this indicator is not so strong in terms of turnover rate. But what is really interesting, is that the vast majority of current employees (76%) do not work overtime. 
+
+```{r}
+ggplot(data, aes(x = OverTime, group = Past_Employee)) + 
+  geom_bar(aes(y = ..prop.., fill = factor(..x..)), 
+           stat="count", 
+           fill= "#999999") +
+  geom_text(aes(label = scales::percent(..prop..), y = ..prop.. ), 
+            stat= "count", 
+            vjust = -.5) +
+  labs(y = "Percentage", fill= "OverTime") +
+  facet_grid(~Past_Employee) +
+  scale_fill_manual(values = c("#386cb0","#fdb462")) + 
+  theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) + 
+  ggtitle("Past Employee")
+
+```
+
+Commuting and especially on an everyday basis can be a strongly influential factor. I will explore how the WorkLifeBalance factor interrelates with DistanceFromHome. Current employees have balanced median values (symmetry) in terms of reported distances from home. This is not the case though with people who have left the company and actually we can see that besides the lower lever of satisfaction all of the other ones are highly skewed. People who have left the company commuted more overall and when evaluating those who rated their work-life balance as too high (4) it seems that most of them commute more. It seems that people don't exclusively base their commuting patterns too high when it comes to evaluating their work-life balance factor.  
+
+
+```{r}
+ggplot(data, aes(x= WorkLifeBalance, y=DistanceFromHome, group = WorkLifeBalance)) + 
+        geom_boxplot(fill= "#999999") +
+        theme(legend.position="none") + 
+        facet_wrap(~ Past_Employee) + 
+        ggtitle("PastEmployee") + 
+        theme(plot.title = element_text(hjust = 0.5))
+
+```
+In terms of business travel, we can hypothetize that it is not a majorly influential factor when considering it as a possible factor that affects attrition rate.   
+
+```{r}
+ggplot(data, 
+        aes(x= BusinessTravel,  group=Past_Employee)) + 
+        geom_bar(aes(y = ..prop.., fill = factor(..x..)), 
+                   stat="count", fill= "#999999") +
+        geom_text(aes(label = scales::percent(..prop..), y = ..prop.. ), 
+                   stat= "count", 
+                   vjust = 1.5) +
+        labs(y = "Percentage", fill="Business Travel") +
+        facet_grid(~Past_Employee) +
+        scale_y_continuous(labels=percent) + 
+        scale_fill_manual(values = c("#386cb0","#ef3b2c", "#fdb462")) + 
+        theme(legend.position = "none", plot.title = element_text(hjust = 0.5)) + 
+        ggtitle("Past_Employee")
+
+```
+
+## Correlation analysis between numeric variables 
+
+Up until now the goal was to identify some insights about things and factors, that i personally consider important, which allow me to have a more clear view on some key aspects of almost every organization. 
+Now it is time for some statistical assistance. A correlation plot will be the outcome of the procedure that will highlight which numerical variables are highly correlated.  
+So the variables "YearsAtCompany", "TotalWorkingYears" and "YearsWithCurrManager" found to be highly correlated and thus i decided to remove manually 2 of them, namely "YearsAtCompany" and "YearsWithCurrManager". 
+ 
+```{r}
+numeric_data <- data[sapply(data,is.numeric)]
+head(numeric_data)
+
+cor_matrix <- cor(numeric_data)
+cor(cor_matrix)
+summary(cor_matrix[upper.tri(cor_matrix)])
+
+corrplot(cor_matrix, order = "FPC", method = "color", type = "lower",
+         tl.cex = 0.5, tl.col = rgb(0, 0, 0))
+
+highlyCor <- findCorrelation(cor_matrix, cutoff=0.7)
+
+#highly_Correlated_names <- colnames(numeric_data)[highlyCor]
+
+mycols <- c("YearsAtCompany","YearsWithCurrManager")
+no <- which(names(numeric_data) %in% mycols)
+```
+
+# Modelling Phase
+
+Up until now i have tried to prepare a dataset to the extend that it is interpretable and simultaneously is meangifull to me. At this point i will start preparing my dataset for modelling. First step is to convert all the categorical variables to numerical in order to facilitate the relevant machine learning procedures. My target variable remains a factor since this is a classification problem. 
+
+```{r}
+test_var<-data
+dummy_var<-dummyVars("~ .",data=subset(data, select=c( -Past_Employee ) ),sep="_")
+data<-data.frame(predict(dummy_var, newdata = data))
+data<-cbind(data,test_var["Past_Employee"])
+rm(test_var)
+
+str(data)
+```
+
+
+##Split the original dataset into training & testing datasets  
+Before proceeding further i will partition the dataset. The validation set will be used to evaluate my model against later on. I know that the imbalance of the dataset will impact the accuracy of my models but i want to have an initial quick overview of some key concepts. 
+
+```{r}
+set.seed(1)
+predictor <- "Past_Employee"
+method <- "class"
+
+set.seed(1)
+split <- sample.split(data[, predictor], SplitRatio = 0.7)
+
+train_data <- subset(data, split = TRUE)
+test_data <- subset(data, split = FALSE)
+```
+
+##Modeling in the initial dataset (Logistic Regression / Decision Trees / Random Forest)
+
+A variety of models were employed. 
+```{r}
+table(train_data$Past_Employee)
+
+# Logistic Regression / Perfect Seperation  
+turnoverLog <- glm(Past_Employee~.,data=train_data,family = binomial, control = list(maxit = 40))
+predGlm <- predict(turnoverLog,type="response",newdata=test_data)
+t <- table(test_data$Past_Employee,predGlm>.5)
+sum(diag(t))/sum(t)
+
+#Decision Tree 
+model_dt <- rpart(Past_Employee ~., data = train_data, method = "class", minbucket = 25)
+summary(model_dt)
+preds <- predict(model_dt, test_data, type = "class")
+
+t1 <- table(test_data$Past_Employee, preds, dnn = c("Actual", "Predicted"))  
+sum(diag(t1))/sum(t1)
+
+rpart.plot(model_dt, type = 3, extra = 101, fallen.leaves = F)
+
+# prune it (useless in a way)
+printcp(model_dt)
+opt <- which.min(model_dt$cptable[, "xerror"]) #get index of CP with lowest error 
+cp <- model_dt$cptable[opt, "CP"] # get it's value 
+pruned_dt <- prune(model_dt, cp)
+predspr <- predict(model_dt, test_data, type = "class")
+
+rpart.plot(pruned_dt, type = 3, extra = 101)
+plot.roc(as.numeric(test_data$Past_Employee), as.numeric(predspr),lwd=2, type="b",print.auc=TRUE,col ="grey")
+
+
+# Non-Pruned Classification Tree C50
+grep("Past_Employee", colnames(train_data))
+
+treeModel = C5.0(x = train_data[, -76], y = train_data$Past_Employee,
+control = C5.0Control(noGlobalPruning=TRUE), trials = 10)  # trials increase the # of boosting operations and thus hopefully accuracy 
+
+treeModel
+summary(treeModel)
+
+p <- predict(treeModel, test_data, type = "class")
+t <- table(test_data$Past_Employee,p)
+sum(diag(t))/sum(t)
+
+# Pruned Classification Tree c50 (unbelievable accuracy)
+treeModel1 = C5.0(x = train_data[, -76], y = train_data$Past_Employee,
+control = C5.0Control(noGlobalPruning=FALSE), trials = 10)
+
+treeModel
+summary(treeModel)
+
+p1 <- predict(treeModel1, test_data, type = "class")
+t1 <- table(test_data$Past_Employee,p1)
+sum(diag(t1))/sum(t1)
+
+#We train a treebag model using caret syntax on traindata and predict Past_Employees on the testdata portion:
+
+ctrl <- trainControl(method = "cv", number = 5)
+
+tbmodel <- train(Past_Employee ~ ., data = train_data, method = "treebag",
+                 trControl = ctrl)
+train_data$Past_Employee <- as.factor(train_data$Past_Employee)
+predictors <- names(train_data)[names(train_data) != 'Past_Employee']
+
+pred <- predict(tbmodel, test_data[,predictors])
+
+# To evaluate the model, we call on package pROC for an auc score and plot:
+
+plot.roc(as.numeric(test_data$Past_Employee), as.numeric(pred),lwd=2, type="b",print.auc=TRUE,col ="black")
+
+# Random Forest
+model_rf <- randomForest(as.factor(Past_Employee) ~., data = train_data, importance= TRUE)
+rfpreds <- predict(model_rf, test_data, type = "class")
+t2 <- table(test_data$Past_Employee, rfpreds, dnn = c("Actual", "Predicted"))  
+sum(diag(t2))/sum(t2)
+varImp(model_rf)
+
+plot.roc(as.numeric(test_data$Past_Employee), as.numeric(rfpreds),lwd=2, type="b",print.auc=TRUE,col ="black")
+
+#Sensitivity - The proportion of actual positive cases that were correctly identified.
+
+#Specificity - The proportion of actual negative cases that were correctly identified.
+```
+### Balancing the dataset 
+The above models have all highlighted the significance of a balanced dataset. This unbalance needs to be accounted for in this analysis and this will be the target of the process that follows. I will create extra positive observations (past employee / yes) using SMOTE. I will set the  parameter perc.over = 100 to double the quantity of positive cases, and the parameter perc.under=200 to keep half of what was created as negative cases.This process will allow me to build a model that is better able to make the appropriate distinctions when dealing with the relevant classes of the target variable. 
+
+```{r}
+#str(train_data)
+col_factors <- names(Filter(is.factor, data))
+train_data[col_factors] <- lapply(data[col_factors], factor)
+test_data[col_factors] <- lapply(data[col_factors], factor)
+p=prop.table(table(data$Past_Employee))
+cat("Before SMOTE the propotions are:"); print(p,row.names=FALSE)
+
+set.seed(3)
+smote_vers <- SMOTE(Past_Employee~ ., data = data, perc.over = 100, perc.under=200)
+
+q=prop.table(table(smote_vers$Past_Employee))
+cat("After SMOTE the propotions are:"); print(q,row.names=FALSE)
+
+smote_vers$Past_Employee <- as.numeric(smote_vers$Past_Employee)
+table(smote_vers$Past_Employee)  #balanced
+#dim(smote_vers)
+```
+
+## Modeling in the Balanced dataset
+
+First of all the dataset must be split into training and testing subsets, which will be used to build the model and test
+it respectively.
+
+```{r}
+dataPartition <- sample(2, nrow(smote_vers), replace = TRUE, prob = c(0.7,0.3))
+
+trainData <- smote_vers[dataPartition ==1,]
+testData = smote_vers[dataPartition ==2,]
+#table(trainData$Past_Employee)
+
+trainData$Past_Employee <- as.factor(trainData$Past_Employee)
+#dim(trainData)
+#dim(testData)
+```
+
+We will built now the new classification models and check their relevant accuracy. Both models performed very well and achieved high amounts of class matches.Classification decision tree method accurately predicted the target variable 80% of the time while the random forest technique managed a 83% accuracy.
+
+```{r}
+# first pruned tree
+grep("Past_Employee", colnames(trainData))
+tree_balanced = C5.0(x = trainData[, -76], y = trainData$Past_Employee,
+control = C5.0Control(noGlobalPruning=FALSE), trials = 10)
+
+#tree_balanced
+summary(tree_balanced)
+
+p1 <- predict(tree_balanced, testData, type = "class")
+t1 <- table(testData$Past_Employee, p1)
+sum(diag(t1))/sum(t1)
+
+# now random forest 
+
+randomForestModel <-  randomForest(Past_Employee ~ ., data=trainData, ntree=100, proximity=T
+)
+p2 <- predict(randomForestModel, testData, type = "class")
+
+t2 <-table(testData$Past_Employee, p2, dnn = c("Actual", "Predicted"))
+sum(diag(t2))/sum(t2)
+
+varImp(tree_balanced)
+varImp(randomForestModel)
+
+```
+
+I will cross check the finding using the boruta method to generate the variable importance table.
+
+```{r, warning=FALSE}
+set.seed(3)
+boruta.train <- Boruta(Past_Employee~., data=smote_vers, doTrace = 2)
+print(boruta.train[1:10])
+
+plot(boruta.train, cex.axis=.5, las=2, xlab="", main="Variable Importance")
+```
+
+## Clustering Analysis 
+
+The final part of this analysis involves removing the target variable (Past_Employee status) from the dataset and carrying out clustering on the remaining features. Up until this point, we were in the area of supervised machine learning. By removing the class feature, we enter the unsupervised machine learning territory where our goal is to group features into as-yet-unknown classes. The results can indicate if the binary classification that was attempted was meaningfull or we need to consider a multi class one.  The aggregate function is used to find the mean value across all feature splits (for each cluster) and it allows us to identify on an initial level how well defined each cluster is. Optimum results involve clusters whose mean value deviates from the other ones.   
+
+```{r, warning=FALSE}
+
+wss <- (nrow(smote_vers)-1)*sum(apply(smote_vers,2,var))
+for (i in 2:15) wss[i] <- sum(kmeans(smote_vers,centers=i)$withinss)
+plot(1:15, wss, type="b", xlab="Number of Clusters", ylab="Within Sum of Squares")
+
+# use of a package (any difference?)
+set.seed(123)
+library(factoextra)
+fviz_nbclust(smote_vers, kmeans, method = "wss")
+
+k3 <-kmeans(smote_vers, 3, nstart = 25) # 3 cluster solution
+p3 <- fviz_cluster(k3, geom = "point", data = smote_vers) + ggtitle("k = 3")
+
+k4 <-kmeans(smote_vers, 4, nstart = 25) # 4 cluster solution
+p4 <- fviz_cluster(k4, geom = "point", data = smote_vers) + ggtitle("k = 4")
+
+k5 <- kmeans(smote_vers, 5, nstart = 25) # 5 cluster solution
+p5 <- fviz_cluster(k5, geom = "point", data = smote_vers) + ggtitle("k = 5")
+
+# get cluster means 
+aggregate(smote_vers,by=list(k3$cluster),FUN=mean)
+aggregate(smote_vers,by=list(k4$cluster),FUN=mean)
+aggregate(smote_vers,by=list(k5$cluster),FUN=mean)
+
+
+library(gridExtra)
+grid.arrange(p3, p4, p5)
+
+```
+
+The ideal number of splits according to the elbow method is five but i have generated other cases (3 and 4 cluster solutions) to try to confirm my choice. 
+
+
+
+
+
+
+
+
+
